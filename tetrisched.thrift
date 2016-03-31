@@ -1,6 +1,13 @@
 namespace cpp alsched
 namespace java tetrisched
 
+enum policy_t {
+    FCFS_STRICT = 0,
+    FCFS_RANDOM = 1,
+    FCFS_HETERO = 2,
+    SJF_HETERO  = 3
+}
+
 typedef i32 MachineType
 enum machine_t {
     MACHINE_GPU = 0,
@@ -27,3 +34,4 @@ service TetrischedService {
 service YARNTetrischedService {
     void AllocResources(1:JobID jobId, 2:set<i32> machines),
 }
+

@@ -31,6 +31,8 @@ using boost::shared_ptr;
 using namespace std;
 using namespace alsched;
 
+policy_t::type policyType = policy_t::FCFS_RANDOM;
+
 class yarn_job_t {
     public:
         JobID jobId;
@@ -56,7 +58,8 @@ class TetrischedServiceHandler : virtual public TetrischedServiceIf
 {
 
 private:
-    queue<yarn_job_t*> job_queue;
+    /* use deque to simulate queue*/
+    deque<yarn_job_t*> job_queue;
     bool * machine_alloc;
     int num_machines;
     int num_available;
@@ -126,15 +129,64 @@ public:
         num_available = num_machines;
     }
 
-    /* get first job from the front of queue and try to serve */
-    void ServeQueue() {
-        if (job_queue.size() == 0)
-            return;
+    bool ServeFirst() {
         yarn_job_t* job = job_queue.front();
         if(DispatchJob(job->jobId, job->jobType, job->k,
-                       job->priority, job->duration, job->slowDuration)){
-            job_queue.pop();
+                       job->priority, job->duration, job->slowDuration)) {
+            printf("Serve first job\n");
+            job_queue.pop_front();
             delete(job);
+            return true;
+        }
+        return false;
+    }
+
+    bool ServeShortest() {
+        /* initialize with a big enough number */
+        double minDuration = (double) INT32_MAX;
+        /* initialize with NULL result */
+        std::deque<yarn_job_t*>::iterator minJobIt = job_queue.end();
+        /* loop queue to find shortest */
+        std::deque<yarn_job_t*>::iterator it;
+        for (it = job_queue.begin(); it != job_queue.end(); ++it) {
+            yarn_job_t* job = *it;
+            double duration;
+            if (num_available < job -> k)
+                continue;
+            if (CanAllocPreferredResources(job -> jobType, job -> k)) {
+                duration = job -> duration;
+            }
+            else {
+                duration = job -> slowDuration;
+            }
+            if (duration < minDuration) {
+                minDuration = duration;
+                minJobIt = it;
+            }
+        }
+        if (minJobIt != job_queue.end()) {
+            /* find one, schedule the job */
+            yarn_job_t * minJob = *minJobIt;
+            if(DispatchJob(minJob->jobId, minJob->jobType, minJob->k,
+                           minJob->priority, minJob->duration, minJob->slowDuration)) {
+                printf("Serve shortest job, duration: %.3f\n", minDuration);
+                job_queue.erase(minJobIt);
+                delete(minJob);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /* get first job from the front of queue and try to serve */
+    bool ServeQueue() {
+        if (job_queue.size() == 0)
+            return false;
+        if(policyType == policy_t::SJF_HETERO) {
+            return ServeShortest();
+        }
+        else {
+            return ServeFirst();
         }
     }
 
@@ -249,13 +301,22 @@ public:
      * otherwise, return false */
     bool TryAllocPreferredResources(std::set<int32_t> & machines,
                                          const job_t::type jobType, const int32_t k) {
-
         if (jobType == job_t::JOB_MPI) {
             return TryAllocSameRack(machines, jobType, k);
         }
         else {
             return TryAllocGPUMachines(machines, jobType, k);
         }
+    }
+
+    /* check if can schedule on preferred resources based on job type */
+    bool CanAllocPreferredResources(const job_t::type jobType, const int32_t k) {
+        set<int32_t> machines;
+        if (TryAllocPreferredResources(machines, jobType, k)) {
+            FreeMachines(machines);
+            return true;
+        }
+        return false;
     }
 
     bool ScheduleHeteroFCFS(std::set<int32_t> & machines,
@@ -279,9 +340,22 @@ public:
         // try to allocate some nodes
         set<int32_t> machines;
         // switch on scheduling policy
-        success = ScheduleStrictFCFS(machines, k);
-        success = ScheduleRandomFCFS(machines, k);
-        success = ScheduleHeteroFCFS(machines, jobType, k);
+        switch (policyType) {
+            case policy_t::FCFS_STRICT:
+                success = ScheduleStrictFCFS(machines, k);
+                break;
+            case policy_t::FCFS_RANDOM:
+                success = ScheduleRandomFCFS(machines, k);
+                break;
+            case policy_t::FCFS_HETERO:
+                success = ScheduleHeteroFCFS(machines, jobType, k);
+                break;
+            case policy_t::SJF_HETERO:
+                /* same as FCFS_HETERO
+                 * difference in handling the queue */
+                success = ScheduleHeteroFCFS(machines, jobType, k);
+                break;
+        }
         if (success) {
             printf("succeed in scheduling job %d\n", jobId);
             success = AllocResources(jobId, machines);
@@ -297,10 +371,11 @@ public:
         printf("AddJob\n");
         if(job_queue.size() != 0 ||
                 !DispatchJob(jobId, jobType, k, priority, duration, slowDuration)) {
+            /* no enough resources, add to queue */
             printf("add job %d to queue\n", jobId);
             yarn_job_t* job = new yarn_job_t(jobId, jobType, k,
                                              priority, duration, slowDuration);
-            job_queue.push(job);
+            job_queue.push_back(job);
         }
     }
 
@@ -320,7 +395,8 @@ public:
         FreeMachines(machines);
         // assume size is correct
         num_available += machines.size();
-        ServeQueue();
+        /* keep serve until no enough resources */
+        while(ServeQueue());
     }
 
 };
