@@ -230,6 +230,11 @@ public:
     bool ScheduleRandomFCFS(std::set<int32_t> & machines, const int32_t k) {
         if (num_available < k)
             return false;
+        if (num_available == k) {
+            /* alloc all remaining machines in this case
+             * use this small optimization to avoid massive collisions */
+            return ScheduleStrictFCFS(machines, k);
+        }
         for (int i = 0; i < k; i++) {
             int randInt = rand() % num_machines;
             while (machine_alloc[randInt]) {
