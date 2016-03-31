@@ -144,8 +144,9 @@ public:
         }
         if(count < k) {
             // free pre-alloc resources
-            for (auto machine : machines) {
-                free_machine(machine);
+            std::set<int32_t>::iterator it;
+            for (it = machines.begin(); it != machines.end(); ++it) {
+                free_machine(*it);
             }
             // no enough resources, return false
         }
@@ -175,8 +176,9 @@ public:
         // Your implementation goes here
         printf("FreeResources\n");
         // Free up resources
-        for (auto machine : machines) {
-            free_machine(machine);
+        std::set<int32_t>::iterator it;
+        for (it = machines.begin(); it != machines.end(); ++it) {
+            free_machine(*it);
         }
         ServeQueue();
     }
