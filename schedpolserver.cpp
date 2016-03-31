@@ -74,6 +74,7 @@ public:
         printf("init\n");
         ReadConfigFile();
         machine_alloc = new bool[num_machines];
+        memset(machine_alloc, 0, num_machines);
     }
 
     /* read rack_cap from config-mini file */
@@ -96,6 +97,8 @@ public:
 
     /* get first job from the front of queue and try to serve */
     void ServeQueue() {
+        if (job_queue.size() == 0)
+            return;
         yarn_job_t* job = job_queue.front();
         if(DispatchJob(job->jobId, job->jobType, job->k,
                        job->priority, job->duration, job->slowDuration)){
