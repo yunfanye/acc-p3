@@ -152,6 +152,7 @@ public:
         for (it = job_queue.begin(); it != job_queue.end(); ++it) {
             yarn_job_t* job = *it;
             double duration;
+            // TODO: whether need to wait no enough resource job
             if (num_available < job -> k)
                 continue;
             if (CanAllocPreferredResources(job -> jobType, job -> k)) {
@@ -240,8 +241,8 @@ public:
             while (machine_alloc[randInt]) {
                 randInt = rand() % num_machines;
             }
-            alloc_machine(i);
-            machines.insert(i);
+            alloc_machine(randInt);
+            machines.insert(randInt);
         }
         return true;
     }
