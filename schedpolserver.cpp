@@ -68,6 +68,16 @@ public:
         machine_alloc = new bool[num_machines];
     }
 
+    /* get first job from the front of queue and try to serve */
+    void ServeQueue() {
+        yarn_job_t* job = job_queue.front();
+        if(DispatchJob(job->jobId, job->jobType, job->k,
+                       job->priority, job->duration, job->slowDuration)){
+            job_queue.pop();
+            delete(job);
+        }
+    }
+
     bool AllocResources(const JobID jobId, const set<int32_t> machines) {
         bool success = false;
         int yarnport = 9090;
@@ -142,12 +152,7 @@ public:
         for (auto machine : machines) {
             free_machine(machine);
         }
-        yarn_job_t* job = job_queue.front();
-        if(DispatchJob(job->jobId, job->jobType, job->k,
-                       job->priority, job->duration, job->slowDuration)){
-            job_queue.pop();
-            delete(job);
-        }
+        ServeQueue();
     }
 
 };
