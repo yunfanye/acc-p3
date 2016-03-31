@@ -10,6 +10,15 @@
 #include <queue>
 #include <set>
 
+#include "rapidjson/document.h"
+#include "rapidjson/writer.h"
+#include "rapidjson/stringbuffer.h"
+#include <fstream>
+#include <sstream>
+#include <string>
+
+using namespace rapidjson;
+
 using namespace ::apache::thrift;
 using namespace ::apache::thrift::protocol;
 using namespace ::apache::thrift::transport;
@@ -63,9 +72,26 @@ public:
     {
         // Your initialization goes here
         printf("init\n");
-        // TODO: initialize with configs from config-mini
-        num_machines = 24;
+        ReadConfigFile();
         machine_alloc = new bool[num_machines];
+    }
+
+    /* read rack_cap from config-mini file */
+    void ReadConfigFile() {
+        const char * inFileName = "config-mini";
+        ifstream inFile;
+        inFile.open(inFileName);//open the input file
+        stringstream strStream;
+        strStream << inFile.rdbuf();//read the file
+        string jsonStr = strStream.str();//str holds the content of the file
+        const char * json = jsonStr.c_str();
+        Document document;
+        document.Parse(json);
+        const Value& rackCap = document["rack_cap"];
+        int count = 0;
+        for (SizeType i = 0; i < rackCap.Size(); i++) // Uses SizeType instead of size_t
+            count += rackCap[i].GetInt();
+        num_machines = count;
     }
 
     /* get first job from the front of queue and try to serve */
