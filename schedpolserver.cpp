@@ -17,6 +17,8 @@
 #include <sstream>
 #include <string>
 
+#include <cstdlib>
+
 using namespace rapidjson;
 
 using namespace ::apache::thrift;
@@ -58,7 +60,7 @@ private:
     queue<yarn_job_t*> job_queue;
     bool * machine_alloc;
     int num_machines;
-
+    int num_available;
     void alloc_machine(int32_t machine) {
         machine_alloc[machine] = true;
     }
@@ -75,6 +77,7 @@ public:
         ReadConfigFile();
         machine_alloc = new bool[num_machines];
         memset(machine_alloc, 0, num_machines);
+        srand(NULL);
     }
 
     /* read rack_cap from config-mini file */
@@ -93,6 +96,7 @@ public:
         for (SizeType i = 0; i < rackCap.Size(); i++) // Uses SizeType instead of size_t
             count += rackCap[i].GetInt();
         num_machines = count;
+        num_available = num_machines;
     }
 
     /* get first job from the front of queue and try to serve */
@@ -126,15 +130,10 @@ public:
         return success;
     }
 
-    bool DispatchJob(const JobID jobId, const job_t::type jobType, const int32_t k,
-                     const int32_t priority, const double duration, const double slowDuration) {
-        // JOB_MPI prefers machines on one rack
-        // JOB_GPU prefers big machines
-        // TODO: race
-        bool success = false;
-        // try to allocate some nodes
-        set<int32_t> machines;
+    bool ScheduleStrictFCFS(std::set<int32_t> & machines, const int32_t k) {
         // FCFS + highest rank
+        if (num_available < k)
+            return false;
         int count = 0;
         for (int i = 0; i < num_machines; i++) {
             if (machine_alloc[i])
@@ -145,17 +144,53 @@ public:
             if (count >= k)
                 break;
         }
-        if(count < k) {
-            // free pre-alloc resources
-            std::set<int32_t>::iterator it;
-            for (it = machines.begin(); it != machines.end(); ++it) {
-                free_machine(*it);
+        return true;
+    }
+
+    bool ScheduleRandomFCFS(std::set<int32_t> & machines, const int32_t k) {
+        if (num_available < k)
+            return false;
+        for (int i = 0; i < k; i++) {
+            int randInt = rand() % num_machines;
+            while (machine_alloc[randInt]) {
+                randInt = rand() % num_machines;
             }
-            // no enough resources, return false
+            alloc_machine(i);
+            machines.insert(i);
         }
-        else {
+        return true;
+    }
+
+    bool ScheduleHeteroFCFS(std::set<int32_t> & machines, const int32_t k) {
+        if (num_available < k)
+            return false;
+        for (int i = 0; i < k; i++) {
+            int randInt = rand() % num_machines;
+            while (machine_alloc[randInt]) {
+                randInt = rand() % num_machines;
+            }
+            alloc_machine(i);
+            machines.insert(i);
+        }
+        return true;
+    }
+
+    bool DispatchJob(const JobID jobId, const job_t::type jobType, const int32_t k,
+                     const int32_t priority, const double duration, const double slowDuration) {
+        // JOB_MPI prefers machines on one rack
+        // JOB_GPU prefers big machines
+        // TODO: race
+        bool success = false;
+        // try to allocate some nodes
+        set<int32_t> machines;
+        // scheduling policy
+        success = ScheduleStrictFCFS(machines, k);
+        success = ScheduleRandomFCFS(machines, k);
+        success = ScheduleHeteroFCFS(machines, k);
+        if (success) {
             printf("succeed in scheduling job %d\n", jobId);
             success = AllocResources(jobId, machines);
+            num_available -= k;
         }
         return success;
     }
@@ -183,6 +218,8 @@ public:
         for (it = machines.begin(); it != machines.end(); ++it) {
             free_machine(*it);
         }
+        // assume size is correct
+        num_available += machines.size();
         ServeQueue();
     }
 
