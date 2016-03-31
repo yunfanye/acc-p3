@@ -15,6 +15,7 @@
 #include "rapidjson/stringbuffer.h"
 #include <fstream>
 #include <sstream>
+#include <climits>
 #include <string>
 
 #include <cstdlib>
@@ -87,7 +88,7 @@ public:
         ReadConfigFile();
         machine_alloc = new bool[num_machines];
         memset(machine_alloc, 0, num_machines);
-        srand(NULL);
+        srand((unsigned int) time(NULL));
     }
 
     /* read rack_cap from config-mini file */
@@ -108,7 +109,7 @@ public:
         num_rack_machine = new int[num_racks];
         rack_machine_type = new MachineType[num_racks];
         int startMahineId = 0;
-        for (SizeType i = 0; i < num_racks; i++) {
+        for (SizeType i = 0; i < rackCap.Size(); i++) {
             // Uses SizeType instead of size_t
             int machineCount = rackCap[i].GetInt();
             // get machine number in rack
@@ -143,7 +144,7 @@ public:
 
     bool ServeShortest() {
         /* initialize with a big enough number */
-        double minDuration = (double) INT32_MAX;
+        double minDuration = (double) INT_MAX;
         /* initialize with NULL result */
         std::deque<yarn_job_t*>::iterator minJobIt = job_queue.end();
         /* loop queue to find shortest */
