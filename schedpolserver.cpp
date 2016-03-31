@@ -188,61 +188,81 @@ public:
         return true;
     }
 
+    bool TryAllocGPUMachines(std::set<int32_t> & machines,
+                             const job_t::type jobType, const int32_t k) {
+        /* try to schedule on GPU machines */
+        int count = 0;
+        for (int i = 0; i < num_racks; i++) {
+            if (rack_machine_type[i] == machine_t::MACHINE_GPU) {
+                /* if it is GPU machine rack, loop to find available */
+                for (int j = 0; j < num_rack_machine[i]; j++) {
+                    int32_t machine = racks[i][j];
+                    if (!machine_alloc[machine]) {
+                        alloc_machine(machine);
+                        machines.insert(machine);
+                        count++;
+                        if (count >= k) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        /* not enough, free pre-alloc machines */
+        FreeMachines(machines);
+        return false;
+    }
+
+    bool TryAllocSameRack(std::set<int32_t> & machines,
+                          const job_t::type jobType, const int32_t k) {
+        /* try to schedule on the same rack */
+        int count = 0;
+        for (int i = 0; i < num_racks; i++) {
+            int available = 0;
+            /* acquire the number of available machines in the rack */
+            for (int j = 0; j < num_rack_machine[i]; j++) {
+                int32_t machine = racks[i][j];
+                if (!machine_alloc[machine]) {
+                    available++;
+                }
+            }
+            if (available >= k) {
+                /* enough machines, alloc on this rack */
+                for (int j = 0; j < num_rack_machine[i]; j++) {
+                    int32_t machine = racks[i][j];
+                    if (!machine_alloc[machine]) {
+                        alloc_machine(machine);
+                        machines.insert(machine);
+                        count++;
+                        if (count >= k) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /* try to schedule on preferred resources based on job type
+     * return true and store machine id in machines if succeeded
+     * otherwise, return false */
+    bool TryAllocPreferredResources(std::set<int32_t> & machines,
+                                         const job_t::type jobType, const int32_t k) {
+
+        if (jobType == job_t::JOB_MPI) {
+            return TryAllocSameRack(machines, jobType, k);
+        }
+        else {
+            return TryAllocGPUMachines(machines, jobType, k);
+        }
+    }
+
     bool ScheduleHeteroFCFS(std::set<int32_t> & machines,
                             const job_t::type jobType, const int32_t k) {
         if (num_available < k)
             return false;
-        int count = 0;
-        if (jobType == job_t::JOB_MPI) {
-            /* try to schedule on the same rack */
-            for (int i = 0; i < num_racks; i++) {
-                int available = 0;
-                /* acquire the number of available machines in the rack */
-                for (int j = 0; j < num_rack_machine[i]; j++) {
-                    int32_t machine = racks[i][j];
-                    if (!machine_alloc[machine]) {
-                        available++;
-                    }
-                }
-                if (available >= k) {
-                    /* enough machines, alloc on this rack */
-                    for (int j = 0; j < num_rack_machine[i]; j++) {
-                        int32_t machine = racks[i][j];
-                        if (!machine_alloc[machine]) {
-                            alloc_machine(machine);
-                            machines.insert(machine);
-                            count++;
-                            if (count >= k)
-                                break;
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-        else {
-            /* try to schedule on GPU machines */
-            for (int i = 0; i < num_racks; i++) {
-                if (rack_machine_type[i] == machine_t::MACHINE_GPU) {
-                    /* if it is GPU machine rack, loop to find available */
-                    for (int j = 0; j < num_rack_machine[i]; j++) {
-                        int32_t machine = racks[i][j];
-                        if (!machine_alloc[machine]) {
-                            alloc_machine(machine);
-                            machines.insert(machine);
-                            count++;
-                            if (count >= k)
-                                break;
-                        }
-                    }
-                }
-                if (count >= k)
-                    break;
-            }
-        }
-        if (count < k) {
-            /* free pre-alloc machines */
-            FreeMachines(machines);
+        if (!TryAllocPreferredResources(machines, jobType, k)) {
             /* fail to schedule on preferred resources
              * free to schedule anywhere, use strict FCFS here */
             ScheduleStrictFCFS(machines, k);
