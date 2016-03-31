@@ -31,8 +31,7 @@ using boost::shared_ptr;
 using namespace std;
 using namespace alsched;
 
-class yarn_job_t
-{
+class yarn_job_t {
     public:
         JobID jobId;
         job_t::type jobType;
@@ -61,6 +60,14 @@ private:
     bool * machine_alloc;
     int num_machines;
     int num_available;
+    /* number of machines */
+    int num_racks;
+    /* machine number in each rack */
+    int * num_rack_machine;
+    /* machines in each rack */
+    int ** racks;
+    MachineType * rack_machine_type;
+
     void alloc_machine(int32_t machine) {
         machine_alloc[machine] = true;
     }
@@ -92,10 +99,30 @@ public:
         Document document;
         document.Parse(json);
         const Value& rackCap = document["rack_cap"];
-        int count = 0;
-        for (SizeType i = 0; i < rackCap.Size(); i++) // Uses SizeType instead of size_t
-            count += rackCap[i].GetInt();
-        num_machines = count;
+        /* get rack info */
+        num_racks = rackCap.Size();
+        racks = new int*[num_racks];
+        num_rack_machine = new int[num_racks];
+        rack_machine_type = new MachineType[num_racks];
+        int startMahineId = 0;
+        for (SizeType i = 0; i < num_racks; i++) {
+            // Uses SizeType instead of size_t
+            int machineCount = rackCap[i].GetInt();
+            // get machine number in rack
+            num_rack_machine[i] = machineCount;
+            // store machine id in rack
+            int * rack = new int[machineCount];
+            for (int j = 0; j < machineCount; j++) {
+                rack[j] = j + startMahineId;
+            }
+            // put rack into racks
+            racks[i] = rack;
+            // TODO: set type
+            rack_machine_type[i] = machine_t::MACHINE_HDFS;
+            startMahineId += machineCount;
+        }
+        rack_machine_type[0] = machine_t::MACHINE_GPU;
+        num_machines = startMahineId;
         num_available = num_machines;
     }
 
@@ -161,16 +188,64 @@ public:
         return true;
     }
 
-    bool ScheduleHeteroFCFS(std::set<int32_t> & machines, const int32_t k) {
+    bool ScheduleHeteroFCFS(std::set<int32_t> & machines,
+                            const job_t::type jobType, const int32_t k) {
         if (num_available < k)
             return false;
-        for (int i = 0; i < k; i++) {
-            int randInt = rand() % num_machines;
-            while (machine_alloc[randInt]) {
-                randInt = rand() % num_machines;
+        int count = 0;
+        if (jobType == job_t::JOB_MPI) {
+            /* try to schedule on the same rack */
+            for (int i = 0; i < num_racks; i++) {
+                int available = 0;
+                /* acquire the number of available machines in the rack */
+                for (int j = 0; j < num_rack_machine[i]; j++) {
+                    int32_t machine = racks[i][j];
+                    if (!machine_alloc[machine]) {
+                        available++;
+                    }
+                }
+                if (available >= k) {
+                    /* enough machines, alloc on this rack */
+                    for (int j = 0; j < num_rack_machine[i]; j++) {
+                        int32_t machine = racks[i][j];
+                        if (!machine_alloc[machine]) {
+                            alloc_machine(machine);
+                            machines.insert(machine);
+                            count++;
+                            if (count >= k)
+                                break;
+                        }
+                    }
+                    break;
+                }
             }
-            alloc_machine(i);
-            machines.insert(i);
+        }
+        else {
+            /* try to schedule on GPU machines */
+            for (int i = 0; i < num_racks; i++) {
+                if (rack_machine_type[i] == machine_t::MACHINE_GPU) {
+                    /* if it is GPU machine rack, loop to find available */
+                    for (int j = 0; j < num_rack_machine[i]; j++) {
+                        int32_t machine = racks[i][j];
+                        if (!machine_alloc[machine]) {
+                            alloc_machine(machine);
+                            machines.insert(machine);
+                            count++;
+                            if (count >= k)
+                                break;
+                        }
+                    }
+                }
+                if (count >= k)
+                    break;
+            }
+        }
+        if (count < k) {
+            /* free pre-alloc machines */
+            FreeMachines(machines);
+            /* fail to schedule on preferred resources
+             * free to schedule anywhere, use strict FCFS here */
+            ScheduleStrictFCFS(machines, k);
         }
         return true;
     }
@@ -183,10 +258,10 @@ public:
         bool success = false;
         // try to allocate some nodes
         set<int32_t> machines;
-        // scheduling policy
+        // switch on scheduling policy
         success = ScheduleStrictFCFS(machines, k);
         success = ScheduleRandomFCFS(machines, k);
-        success = ScheduleHeteroFCFS(machines, k);
+        success = ScheduleHeteroFCFS(machines, jobType, k);
         if (success) {
             printf("succeed in scheduling job %d\n", jobId);
             success = AllocResources(jobId, machines);
@@ -209,15 +284,20 @@ public:
         }
     }
 
-    void FreeResources(const std::set<int32_t> & machines)
-    {
-        // Your implementation goes here
-        printf("FreeResources\n");
+    void FreeMachines(const std::set<int32_t> & machines) {
         // Free up resources
         std::set<int32_t>::iterator it;
         for (it = machines.begin(); it != machines.end(); ++it) {
             free_machine(*it);
         }
+    }
+
+    void FreeResources(const std::set<int32_t> & machines)
+    {
+        // Your implementation goes here
+        printf("FreeResources\n");
+        // free machines
+        FreeMachines(machines);
         // assume size is correct
         num_available += machines.size();
         ServeQueue();

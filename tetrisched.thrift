@@ -1,6 +1,12 @@
 namespace cpp alsched
 namespace java tetrisched
 
+typedef i32 MachineType
+enum machine_t {
+    MACHINE_GPU = 0,
+    MACHINE_HDFS= 1
+}
+
 typedef i32 JobID
 enum job_t {
     JOB_MPI     = 0,
