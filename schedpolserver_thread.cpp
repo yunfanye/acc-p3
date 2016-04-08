@@ -20,6 +20,7 @@
 #include <pthread.h>
 #include <unistd.h>
 
+
 #include <cstdlib>
 
 using namespace rapidjson;
@@ -73,6 +74,11 @@ private:
     /* machines in each rack */
     int ** racks;
     MachineType * rack_machine_type;
+    /* lock */
+    pthread_mutex_t lock;
+    /* create pthread */
+    bool created;
+
 
     void alloc_machine(int32_t machine) {
         machine_alloc[machine] = true;
@@ -85,14 +91,18 @@ public:
 
     TetrischedServiceHandler()
     {
+        if (pthread_mutex_init(&lock, NULL) != 0)
+        {
+            printf("\n mutex init failed\n");
+            return;
+        }
         printf("init\n");
         ReadConfigFile();
         machine_alloc = new bool[num_machines];
         memset(machine_alloc, 0, num_machines);
         srand((unsigned int) time(NULL));
 
-        pthread_t tid;
-        pthread_create(&tid, NULL, CheckServeQueue, NULL);
+        created = false;
 
     }
 
@@ -381,9 +391,15 @@ public:
     void AddJob(const JobID jobId, const job_t::type jobType, const int32_t k,
                 const int32_t priority, const double duration, const double slowDuration)
     {
+        if (!created) {
+            pthread_t tid;
+            pthread_create(&tid, NULL, CheckServeQueue, this);
+        }
+        
+        pthread_mutex_lock(&lock);
         // Your implementation goes here
         printf("AddJob %d\n", jobId);
-        if(job_queue.size() != 0 ||
+        if(policyType == policy_t::SJF_HETERO || job_queue.size() != 0 ||
                 !DispatchJob(jobId, jobType, k, priority, duration, slowDuration)) {
             /* no enough resources, add to queue */
             printf("add job %d to queue\n", jobId);
@@ -391,6 +407,7 @@ public:
                                              priority, duration, slowDuration);
             job_queue.push_back(job);
         }
+        pthread_mutex_unlock(&lock);
     }
 
     void FreeMachines(const std::set<int32_t> & machines) {
@@ -403,20 +420,27 @@ public:
 
     void FreeResources(const std::set<int32_t> & machines)
     {
+        pthread_mutex_lock(&lock);
         // Your implementation goes here
         printf("FreeResources\n");
         // free machines
         FreeMachines(machines);
         // assume size is correct
         num_available += machines.size();
+        pthread_mutex_unlock(&lock);
     }
 
-    void CheckServeQueue() {
+    static void *CheckServeQueue(void * args) {
         /* keep serve until no enough resources */
+        TetrischedServiceHandler * obj = (TetrischedServiceHandler *) args;
+        sleep(12);
         while(1) {
-            while(ServeQueue());
-            sleep(1);
+            sleep(2);
+            pthread_mutex_lock(&(obj->lock));
+            while(obj -> ServeQueue());
+            pthread_mutex_unlock(&(obj->lock));
         }
+        return NULL;
     }
 
 };
@@ -457,3 +481,4 @@ int main(int argc, char **argv)
     server.serve();
     return 0;
 }
+
