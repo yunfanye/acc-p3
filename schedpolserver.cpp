@@ -19,7 +19,7 @@
 #include <string>
 #include <pthread.h>
 #include <unistd.h>
-
+#include <sys/time.h>
 
 #include <cstdlib>
 
@@ -58,6 +58,13 @@ class yarn_job_t {
         }
 };
 
+/* return timestamp in milliseconds */
+unsigned long milli_time() {
+    struct timeval time;
+    gettimeofday(&time, NULL);
+    return time.tv_sec * 1000 * 1000 + time.tv_usec;
+}
+
 class TetrischedServiceHandler : virtual public TetrischedServiceIf
 {
 
@@ -78,7 +85,7 @@ private:
     pthread_mutex_t lock;
     /* create pthread */
     bool created;
-
+    long last_free_time;
 
     void alloc_machine(int32_t machine) {
         machine_alloc[machine] = true;
@@ -103,7 +110,7 @@ public:
         srand((unsigned int) time(NULL));
 
         created = false;
-
+        last_free_time = 0;
     }
 
     /* read rack_cap from config-mini file */
@@ -425,6 +432,7 @@ public:
         printf("FreeResources\n");
         // free machines
         FreeMachines(machines);
+        last_free_time = milli_time();
         // assume size is correct
         num_available += machines.size();
         pthread_mutex_unlock(&lock);
@@ -433,9 +441,11 @@ public:
     static void *CheckServeQueue(void * args) {
         /* keep serve until no enough resources */
         TetrischedServiceHandler * obj = (TetrischedServiceHandler *) args;
-        sleep(12);
+        sleep(24);
         while(1) {
             sleep(2);
+            if(milli_time() - last_free_time < 100 * 1000)
+                sleep(1);
             pthread_mutex_lock(&(obj->lock));
             while(obj -> ServeQueue());
             pthread_mutex_unlock(&(obj->lock));
