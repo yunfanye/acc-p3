@@ -9,6 +9,22 @@ LDFLAGS += -lthrift
 default:	$(TARGETS)
 all:		$(TARGETS)
 
+random:		random_pre $(TARGETS)
+
+random_pre:	
+	$(eval CFLAGS += -DRANDOM)
+
+sjf:		sjf_pre $(TARGETS)
+
+sjf_pre:	
+	$(eval CFLAGS += -DSJF)
+
+hetergen:	hetergen_pre $(TARGETS)
+
+hetergen_pre:	
+	$(eval CFLAGS += -DHETERGEN)
+
+
 TetrischedService_server:	$(OBJS) TetrischedService_server.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 

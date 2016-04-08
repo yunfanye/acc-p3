@@ -32,7 +32,7 @@ using boost::shared_ptr;
 using namespace std;
 using namespace alsched;
 
-policy_t::type policyType = policy_t::FCFS_RANDOM;
+policy_t::type policyType = policy_t::SJF_HETERO;
 
 class yarn_job_t {
     public:
@@ -375,7 +375,7 @@ public:
                 const int32_t priority, const double duration, const double slowDuration)
     {
         // Your implementation goes here
-        printf("AddJob\n");
+        printf("AddJob %d\n", jobId);
         if(job_queue.size() != 0 ||
                 !DispatchJob(jobId, jobType, k, priority, duration, slowDuration)) {
             /* no enough resources, add to queue */
@@ -410,6 +410,28 @@ public:
 
 int main(int argc, char **argv)
 {
+
+    #ifdef RANDOM
+        printf("RANDOM mode\n");
+        policyType = policy_t::FCFS_RANDOM;
+    #endif
+
+    #ifdef SJF
+        printf("SJF mode\n");
+        policyType = policy_t::SJF_HETERO;
+    #endif
+
+    #ifdef HETERGEN
+        printf("HETERGEN mode\n");
+        policyType = policy_t::FCFS_HETERO;
+    #endif
+
+    #ifdef STRICT
+        printf("STRICT mode\n");
+        policyType = policy_t::FCFS_STRICT;
+    #endif
+
+
     //create a listening server socket
     int alschedport = 9091;
     shared_ptr<TetrischedServiceHandler> handler(new TetrischedServiceHandler());
