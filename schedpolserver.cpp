@@ -276,7 +276,8 @@ public:
                           const job_t::type jobType, const int32_t k) {
         /* try to schedule on the same rack */
         int count = 0;
-        for (int i = 0; i < num_racks; i++) {
+
+        for (int i = num_racks - 1; i >= 0; i--) {
             int available = 0;
             /* acquire the number of available machines in the rack */
             for (int j = 0; j < num_rack_machine[i]; j++) {
@@ -300,6 +301,7 @@ public:
                 }
             }
         }
+
         return false;
     }
 
