@@ -258,10 +258,11 @@ public:
              * use this small optimization to avoid massive collisions */
             return ScheduleStrictFCFS(machines, k);
         }
+        int randInt = rand() % num_machines;
         for (int i = 0; i < k; i++) {
-            int randInt = rand() % num_machines;
             while (machine_alloc[randInt]) {
-                randInt = rand() % num_machines;
+                randInt ++;
+                randInt %= num_machines;
             }
             alloc_machine(randInt);
             machines.insert(randInt);
@@ -401,6 +402,7 @@ public:
         if (!created) {
             pthread_t tid;
             pthread_create(&tid, NULL, CheckServeQueue, this);
+            created = true;
         }
         
         pthread_mutex_lock(&lock);
@@ -441,10 +443,9 @@ public:
     static void *CheckServeQueue(void * args) {
         /* keep serve until no enough resources */
         TetrischedServiceHandler * obj = (TetrischedServiceHandler *) args;
-        sleep(24);
         while(1) {
             sleep(2);
-            if(milli_time() - last_free_time < 100 * 1000)
+            if(milli_time() - obj -> last_free_time < 100 * 1000)
                 sleep(1);
             pthread_mutex_lock(&(obj->lock));
             while(obj -> ServeQueue());
@@ -491,4 +492,5 @@ int main(int argc, char **argv)
     server.serve();
     return 0;
 }
+
 

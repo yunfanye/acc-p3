@@ -1,0 +1,4 @@
+analyzing /users/xiaoguaz/hand_in/results/traceGPU-micro.random.results
+2-4-0-39.0-71	: T:   91.96
+2-4-0-70.0-120	: T:  199.00
+mean completion time (E[T]) = 145.483

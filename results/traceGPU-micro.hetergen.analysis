@@ -1,0 +1,4 @@
+analyzing /users/xiaoguaz/hand_in/results/traceGPU-micro.hetergen.results
+2-4-0-39.0-71	: T:   82.63
+2-4-0-70.0-120	: T:  108.51
+mean completion time (E[T]) = 95.5715
