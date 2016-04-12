@@ -35,7 +35,8 @@ using boost::shared_ptr;
 using namespace std;
 using namespace alsched;
 
-policy_t::type policyType = policy_t::SJF_HETERO;
+// policy_t::type policyType = policy_t::SJF_HETERO;
+unsigned long milli_time();
 
 class yarn_job_t {
     public:
@@ -45,6 +46,7 @@ class yarn_job_t {
         int32_t priority;
         double duration;
         double slowDuration;
+        double come_time;
 
         yarn_job_t(const JobID jobId, const job_t::type jobType,
                    const int32_t k, const int32_t priority,
@@ -55,6 +57,7 @@ class yarn_job_t {
             this->priority = priority;
             this->duration = duration;
             this->slowDuration = slowDuration;
+            this->come_time = (double)milli_time() / 1000.0;
         }
 };
 
@@ -86,6 +89,8 @@ private:
     /* create pthread */
     bool created;
     long last_free_time;
+    /* scheduling type */
+    simtype_t::type simType;
 
     void alloc_machine(int32_t machine) {
         machine_alloc[machine] = true;
@@ -115,7 +120,7 @@ public:
 
     /* read rack_cap from config-mini file */
     void ReadConfigFile() {
-        const char * inFileName = "config-mini";
+        const char * inFileName = "config-mini";  // TODO: CHANGE HERE!
         ifstream inFile;
         inFile.open(inFileName);//open the input file
         stringstream strStream;
@@ -150,6 +155,25 @@ public:
         rack_machine_type[0] = machine_t::MACHINE_GPU;
         num_machines = startMahineId;
         num_available = num_machines;
+
+        string simstring = document["simtype"].GetString();
+        // assert(simstring.IsString());
+        if (simstring.compare("hard") == 0) {
+            simType = simtype_t::HARD;
+            printf("Scheduling policy is set to HARD.\n");
+        }
+        else if (simstring.compare("soft") == 0) {
+            simType = simtype_t::SOFT;
+            printf("Scheduling policy is set to SOFT.\n");
+        }
+        else if (simstring.compare("none") == 0) {
+            simType = simtype_t::NONE;
+            printf("Scheduling policy is set to NONE.\n");
+        }
+        else {
+            simType = simtype_t::NONE;
+            printf("Cannot understand the file type: %s, set it to none\n", simType);
+        }
     }
 
     bool ServeFirst() {
@@ -173,17 +197,18 @@ public:
         std::deque<yarn_job_t*>::iterator it;
         for (it = job_queue.begin(); it != job_queue.end(); ++it) {
             yarn_job_t* job = *it;
-            double duration;
+            double duration = -1.0;
+            double current_time = (double)milli_time() / 1000.0;
             // TODO: whether need to wait no enough resource job
             if (num_available < job -> k)
                 continue;
             if (CanAllocPreferredResources(job -> jobType, job -> k)) {
-                duration = job -> duration;
+                duration = job -> duration + current_time - job -> come_time;
             }
-            else {
-                duration = job -> slowDuration;
+            else if (simType::type == simtype_t::SOFT) {
+                duration = job -> slowDuration + current_time - job -> come_time;
             }
-            if (duration < minDuration) {
+            if (duration > 0 && duration < minDuration) {
                 minDuration = duration;
                 minJobIt = it;
             }
@@ -206,12 +231,9 @@ public:
     bool ServeQueue() {
         if (job_queue.size() == 0)
             return false;
-        if(policyType == policy_t::SJF_HETERO) {
-            return ServeShortest();
-        }
-        else {
+        if (simType::type == simtype_t::NONE)
             return ServeFirst();
-        }
+        return ServeShortest();
     }
 
     bool AllocResources(const JobID jobId, const set<int32_t> machines) {
@@ -300,7 +322,7 @@ public:
         /* try to schedule on the same rack */
         int count = 0;
 
-        for (int i = 0; i < num_racks; i++) {
+        for (int i = num_racks - 1; i >= 0; i--) {
             int available = 0;
             /* acquire the number of available machines in the rack */
             for (int j = 0; j < num_rack_machine[i]; j++) {
@@ -356,6 +378,7 @@ public:
         if (num_available < k)
             return false;
         if (!TryAllocPreferredResources(machines, jobType, k)) {
+            if (simType == simtype_t::HARD) return false;
             /* fail to schedule on preferred resources
              * free to schedule anywhere, use strict FCFS here */
             ScheduleStrictFCFS(machines, k);
@@ -372,17 +395,14 @@ public:
         // try to allocate some nodes
         set<int32_t> machines;
         // switch on scheduling policy
-        switch (policyType) {
-            case policy_t::FCFS_STRICT:
-                success = ScheduleStrictFCFS(machines, k);
-                break;
-            case policy_t::FCFS_RANDOM:
+        switch (simType) { 
+            case simtype_t::NONE: 
                 success = ScheduleRandomFCFS(machines, k);
                 break;
-            case policy_t::FCFS_HETERO:
+            case simtype_t::SOFT:
                 success = ScheduleHeteroFCFS(machines, jobType, k);
                 break;
-            case policy_t::SJF_HETERO:
+            case simtype_t::HARD:
                 /* same as FCFS_HETERO
                  * difference in handling the queue */
                 success = ScheduleHeteroFCFS(machines, jobType, k);
@@ -407,8 +427,8 @@ public:
         
         pthread_mutex_lock(&lock);
         // Your implementation goes here
-        printf("AddJob %d\n", jobId);
-        if(policyType == policy_t::SJF_HETERO || job_queue.size() != 0 ||
+        printf("AddJob %d: %f, %f\n", jobId, duration, slowDuration);
+        if(simType != simtype_t::NONE || job_queue.size() != 0 ||
                 !DispatchJob(jobId, jobType, k, priority, duration, slowDuration)) {
             /* no enough resources, add to queue */
             printf("add job %d to queue\n", jobId);
@@ -453,14 +473,14 @@ public:
         }
         return NULL;
     }
-
 };
 
 int main(int argc, char **argv)
 {
-
+/*
     #ifdef RANDOM
         printf("RANDOM mode\n");
+        policyType = policy_t::FCFS_RANDOM;
         policyType = policy_t::FCFS_RANDOM;
     #endif
 
@@ -478,7 +498,7 @@ int main(int argc, char **argv)
         printf("STRICT mode\n");
         policyType = policy_t::FCFS_STRICT;
     #endif
-
+*/
 
     //create a listening server socket
     int alschedport = 9091;

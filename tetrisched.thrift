@@ -8,6 +8,12 @@ enum policy_t {
     SJF_HETERO  = 3
 }
 
+enum simtype_t {
+    NONE = 0,
+    SOFT = 1,
+    HARD = 2
+}
+
 typedef i32 MachineType
 enum machine_t {
     MACHINE_GPU = 0,
