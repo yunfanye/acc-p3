@@ -91,6 +91,8 @@ private:
     long last_free_time;
     /* scheduling type */
     simtype_t::type simType;
+    /* DEBUG */
+    int cnt;
 
     void alloc_machine(int32_t machine) {
         machine_alloc[machine] = true;
@@ -108,7 +110,7 @@ public:
             printf("\n mutex init failed\n");
             return;
         }
-        printf("init\n");
+        printf("[TetrischedServiceHandler()] init\n");
         ReadConfigFile();
         machine_alloc = new bool[num_machines];
         memset(machine_alloc, 0, num_machines);
@@ -116,29 +118,22 @@ public:
 
         created = false;
         last_free_time = 0;
+
+        cnt = 0;
     }
 
     /* read rack_cap from config-mini file */
     void ReadConfigFile() {
-        const char * inFileName = "/opt/projects/advcc/hadoop/hadoop-2.2.0/exp-advcc.phase3/config/config-timex1-c2x4-g4-h6-rho0.70";  // TODO: CHANGE HERE!
-        ifstream inFile;
-        inFile.open(inFileName);//open the input file
-        stringstream strStream;
-        strStream << inFile.rdbuf();//read the file
-        string jsonStr = strStream.str();//str holds the content of the file
-        const char * json = jsonStr.c_str();
-        Document document;
-        document.Parse(json);
-        const Value& rackCap = document["rack_cap"];
+
         /* get rack info */
-        num_racks = rackCap.Size();
+        num_racks = 4;
         racks = new int*[num_racks];
         num_rack_machine = new int[num_racks];
         rack_machine_type = new MachineType[num_racks];
         int startMahineId = 0;
-        for (SizeType i = 0; i < rackCap.Size(); i++) {
+        for (SizeType i = 0; i < 4; i++) {
             // Uses SizeType instead of size_t
-            int machineCount = rackCap[i].GetInt();
+            int machineCount = (i == 0) ? 4 : 6;
             // get machine number in rack
             num_rack_machine[i] = machineCount;
             // store machine id in rack
@@ -156,31 +151,16 @@ public:
         num_machines = startMahineId;
         num_available = num_machines;
 
-        string simstring = document["simtype"].GetString();
-        // assert(simstring.IsString());
-        if (simstring.compare("hard") == 0) {
-            simType = simtype_t::HARD;
-            printf("Scheduling policy is set to HARD.\n");
-        }
-        else if (simstring.compare("soft") == 0) {
-            simType = simtype_t::SOFT;
-            printf("Scheduling policy is set to SOFT.\n");
-        }
-        else if (simstring.compare("none") == 0) {
-            simType = simtype_t::NONE;
-            printf("Scheduling policy is set to NONE.\n");
-        }
-        else {
-            simType = simtype_t::NONE;
-            printf("Cannot understand the file type: %d, set it to none\n", simType);
-        }
+        simType = simtype_t::SOFT;
+        printf("Scheduling policy is set to SOFT.\n");
+
     }
 
     bool ServeFirst() {
         yarn_job_t* job = job_queue.front();
         if(DispatchJob(job->jobId, job->jobType, job->k,
                        job->priority, job->duration, job->slowDuration)) {
-            printf("Serve first job\n");
+            printf("- Serve first job\n");
             job_queue.pop_front();
             delete(job);
             return true;
@@ -220,7 +200,7 @@ public:
             yarn_job_t * minJob = *minJobIt;
             if(DispatchJob(minJob->jobId, minJob->jobType, minJob->k,
                            minJob->priority, minJob->duration, minJob->slowDuration)) {
-                printf("Serve shortest job, duration: %.3f\n", minDuration);
+                printf("- Serve shortest job %d, duration: %.3f, %d racks left\n", (int) minJob->jobId, minDuration, num_available);
                 job_queue.erase(minJobIt);
                 delete(minJob);
                 return true;
@@ -254,6 +234,7 @@ public:
         catch (TException& tx) {
             printf("ERROR calling YARN : %s\n", tx.what());
         }
+        ShowMachines(machines);
         return success;
     }
 
@@ -348,7 +329,7 @@ public:
                 }
             }
         }
-
+        // FreeMachines(machines);
         return false;
     }
 
@@ -413,7 +394,13 @@ public:
         if (success) {
             printf("succeed in scheduling job %d\n", jobId);
             success = AllocResources(jobId, machines);
-            num_available -= k;
+            if (success)
+                num_available -= k;
+            else {
+                printf("NOT VERY SUCCESS...: ");
+                num_available -= k;     // in case fail again
+                ShowMachines(machines);
+            }
         }
         return success;
     }
@@ -428,16 +415,18 @@ public:
         }
         
         pthread_mutex_lock(&lock);
-        printf("Comes Job %d: %f, %f\n", jobId, duration, slowDuration);
+        printf("Comes Job %d: %f, %f; with %d racks demand.\n", jobId, duration, slowDuration, k);
         // Your implementation goes here
         if(simType != simtype_t::NONE || job_queue.size() != 0 ||
                 !DispatchJob(jobId, jobType, k, priority, duration, slowDuration)) {
             /* no enough resources, add to queue */
-            printf("add job %d to queue, %d jobs in the queue, %d available racks.\n", jobId, (int)job_queue.size(), num_available);
             yarn_job_t* job = new yarn_job_t(jobId, jobType, k,
                                              priority, duration, slowDuration);
             job_queue.push_back(job);
+            printf("Add job %d to queue, %d jobs in the queue, %d available racks.\n", jobId, (int)job_queue.size(), num_available);
         }
+        else
+            printf("- Serve the Job %d, %d racks left\n", jobId, num_available);
         pthread_mutex_unlock(&lock);
     }
 
@@ -447,6 +436,19 @@ public:
         for (it = machines.begin(); it != machines.end(); ++it) {
             free_machine(*it);
         }
+    }
+
+    void ShowMachines(const std::set<int32_t> & machines) {
+        // Free up resources
+        std::set<int32_t>::iterator it;
+        printf("[ShowMachines] racks: ");
+        for (it = machines.begin(); it != machines.end(); ++it) {
+            int r = (*it + 2) / 6 + 1;
+            int h = (r == 1) ? 0 : 2;
+            h += *it - (r-1) * 6;
+            printf(" r%dh%d, ", r, h);
+        }
+        printf("\n");
     }
 
     void FreeResources(const std::set<int32_t> & machines)
@@ -472,6 +474,10 @@ public:
             pthread_mutex_lock(&(obj->lock));
             while(obj -> ServeQueue());
             pthread_mutex_unlock(&(obj->lock));
+            obj -> cnt ++;
+            if (obj -> cnt % 100 == 0) {
+                printf("CheckServeQueue: %d jobs in the queue.\n", (int) obj -> job_queue.size());
+            }
         }
         return NULL;
     }
