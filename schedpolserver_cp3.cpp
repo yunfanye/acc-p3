@@ -262,7 +262,7 @@ public:
         if (num_available < k)
             return false;
         int count = 0;
-        for (int i = 0; i < num_machines; i++) {
+        for (int i = num_machines - 1; i >= 0; i--) {
             if (machine_alloc[i])
                 continue;
             alloc_machine(i);

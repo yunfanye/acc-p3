@@ -128,16 +128,25 @@ public:
 
     /* read rack_cap from config-mini file */
     void ReadConfigFile() {
-
+        const char * inFileName = "/opt/projects/advcc/hadoop/hadoop-2.2.0/exp-advcc.phase3/config/config-timex1-c2x4-g4-h6-rho0.70";  // TODO: CHANGE HERE!
+        ifstream inFile;
+        inFile.open(inFileName);//open the input file
+        stringstream strStream;
+        strStream << inFile.rdbuf();//read the file
+        string jsonStr = strStream.str();//str holds the content of the file
+        const char * json = jsonStr.c_str();
+        Document document;
+        document.Parse(json);
+        const Value& rackCap = document["rack_cap"];
         /* get rack info */
-        num_racks = 4;
+        num_racks = rackCap.Size();
         racks = new int*[num_racks];
         num_rack_machine = new int[num_racks];
         rack_machine_type = new MachineType[num_racks];
         int startMahineId = 0;
-        for (SizeType i = 0; i < 4; i++) {
+        for (SizeType i = 0; i < rackCap.Size(); i++) {
             // Uses SizeType instead of size_t
-            int machineCount = (i == 0) ? 4 : 6;
+            int machineCount = rackCap[i].GetInt();
             // get machine number in rack
             num_rack_machine[i] = machineCount;
             // store machine id in rack
@@ -155,9 +164,24 @@ public:
         num_machines = startMahineId;
         num_available = num_machines;
 
-        simType = simtype_t::SOFT;
-        printf("Scheduling policy is set to SOFT.\n");
-
+        string simstring = document["simtype"].GetString();
+        // assert(simstring.IsString());
+        if (simstring.compare("hard") == 0) {
+            simType = simtype_t::HARD;
+            printf("Scheduling policy is set to HARD.\n");
+        }
+        else if (simstring.compare("soft") == 0) {
+            simType = simtype_t::SOFT;
+            printf("Scheduling policy is set to SOFT.\n");
+        }
+        else if (simstring.compare("none") == 0) {
+            simType = simtype_t::NONE;
+            printf("Scheduling policy is set to NONE.\n");
+        }
+        else {
+            simType = simtype_t::NONE;
+            printf("Cannot understand the file type: %d, set it to none\n", simType);
+        }
     }
 
     bool ServeFirst() {
@@ -207,7 +231,7 @@ public:
             yarn_job_t * minJob = *minJobIt;
             if(DispatchJob(minJob->jobId, minJob->jobType, minJob->k,
                            minJob->priority, minJob->duration, minJob->slowDuration)) {
-                printf("- Serve shortest job %d, duration: %.3f, %d racks left\n", (int) minJob->jobId, minDuration, num_available);
+                printf("- Serve shortest job %d, duration: %.3f, %d machines left\n", (int) minJob->jobId, minDuration, num_available);
                 job_queue.erase(minJobIt);
                 delete(minJob);
                 return true;
@@ -218,7 +242,7 @@ public:
 
     /* get first job from the front of queue and try to serve */
     bool ServeQueue() {
-        if (job_queue.size() == 0 || num_available < 4)  // TODO: num_available < 4 HERE for debug
+        if (job_queue.size() == 0)
             return false;
         if (simType == simtype_t::NONE)
             return ServeFirst();
@@ -266,34 +290,34 @@ public:
         return true;
     }
 
-    // bool ScheduleSparseFCFS(std::set<int32_t> & machines, const int32_t k) {
-    //     // FCFS + highest rank
-    //     if (num_available < k)
-    //         return false;
-    //     int k_cp = k;
-    //     for (int i = 1; i < num_racks; i++) {
-    //         int vm_cnt = 0;
-    //         /* if it is GPU machine rack, loop to find available */
-    //         for (int j = 0; j < num_rack_machine[i]; j++) {
-    //             int32_t machine = racks[i][j];
-    //             if (!machine_alloc[machine]) {
-    //                 vm_cnt++;
-    //             }
-    //         }
-    //         for (int w = REMAIN; w < vm_cnt; w++) {
-    //             if (k_cp <= 0) break;
+    bool ScheduleSparseFCFS(std::set<int32_t> & machines, const int32_t k) {
+        // FCFS + highest rank
+        if (num_available < k)
+            return false;
+        int k_cp = k;
+        for (int i = 1; i < num_racks; i++) {
+            int vm_cnt = 0;
+            /* if it is GPU machine rack, loop to find available */
+            for (int j = 0; j < num_rack_machine[i]; j++) {
+                int32_t machine = racks[i][j];
+                if (!machine_alloc[machine]) {
+                    vm_cnt++;
+                }
+            }
+            for (int w = REMAIN; w < vm_cnt; w++) {
+                if (k_cp <= 0) break;
 
-    //             int j = 0;
-    //             int32_t machine = racks[i][j];
-    //             while (machine_alloc[machine]) j++;
-    //             alloc_machine(machine);
-    //             machines.insert(machine);
-    //             k_cp--;
-    //         }
-    //         if (k_cp <= 0) return true;
-    //     }
-    //     return ScheduleStrictFCFS(machines, k_cp);
-    // }
+                int j = 0;
+                int32_t machine = racks[i][j];
+                while (machine_alloc[machine]) j++;
+                alloc_machine(machine);
+                machines.insert(machine);
+                k_cp--;
+            }
+            if (k_cp <= 0) return true;
+        }
+        return ScheduleStrictFCFS(machines, k_cp);
+    }
 
     bool ScheduleRandomFCFS(std::set<int32_t> & machines, const int32_t k) {
         if (num_available < k)
@@ -344,8 +368,6 @@ public:
                           const job_t::type jobType, const int32_t k) {
         /* try to schedule on the same rack */
         int count = 0;
-        // int bestnow = -1;
-        // int bestnow_avai = 999;
 
         for (int i = num_racks - 1; i >= 0; i--) {
             int available = 0;
@@ -371,10 +393,6 @@ public:
                     }
                 }
             }
-            // else if ((available > k && available < bestnow_avai && i > 0) || (bestnow == -1 && i == 0)) {
-            //     bestnow = i;
-            //     bestnow_avai = available;
-            // }
         }
         // FreeMachines(machines);
         return false;
@@ -409,11 +427,11 @@ public:
             return false;
         if (!TryAllocPreferredResources(machines, jobType, k)) {
             if (simType == simtype_t::HARD) return false;
-            // if (jobType == job_t::JOB_GPU) ScheduleSparseFCFS(machines, k);
+            if (jobType == job_t::JOB_GPU) ScheduleSparseFCFS(machines, k);
             /* fail to schedule on preferred resources
              * free to schedule anywhere, use strict FCFS here */
-            // else ScheduleStrictFCFS(machines, k);
-            return ScheduleStrictFCFS(machines, k);
+            else ScheduleStrictFCFS(machines, k);
+            // return ScheduleStrictFCFS(machines, k);
         }
         return true;
     }
@@ -490,7 +508,7 @@ public:
     void ShowMachines(const std::set<int32_t> & machines) {
         // Free up resources
         std::set<int32_t>::iterator it;
-        printf("[Show Machines] racks: ");
+        printf("[Show Machines]");
         for (it = machines.begin(); it != machines.end(); ++it) {
             int r = (*it + 2) / 6 + 1;
             int h = (r == 1) ? 0 : 2;
@@ -518,7 +536,8 @@ public:
     {
         pthread_mutex_lock(&lock);
         // Your implementation goes here
-        printf("FreeResources\n");
+        printf("FreeResources: ");
+        ShowMachines(machines);
         // free machines
         FreeMachines(machines);
         last_free_time = milli_time();
