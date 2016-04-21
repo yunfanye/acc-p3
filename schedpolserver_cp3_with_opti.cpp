@@ -24,8 +24,7 @@
 #include <cstdlib>
 
 #define REMAIN 4
-#define HALF_RESOURCE 12
-#define TIME_OUT 1200
+#define TIME_OUT 1180
 
 using namespace rapidjson;
 
@@ -203,20 +202,25 @@ public:
         std::deque<yarn_job_t*>::iterator minJobIt = job_queue.end();
         /* loop queue to find shortest */
         std::deque<yarn_job_t*>::iterator it;
+        double current_time = (double)milli_time() / 1000000.0;
+        bool minIsSlow = false;
         for (it = job_queue.begin(); it != job_queue.end(); ++it) {
             yarn_job_t* job = *it;
             double duration = (double) INT_MAX;
-            double current_time = (double)milli_time() / 1000000.0;
             // TODO: whether need to wait no enough resource job
             if (num_available < job -> k)
                 continue;
+            bool isSlow;
             if (CanAllocPreferredResources(job -> jobType, job -> k)) {
                 duration = job -> duration + current_time - job -> come_time;
+                isSlow = false;
             }
             else if (simType == simtype_t::SOFT) {
                 duration = job -> slowDuration + current_time - job -> come_time;
+                isSlow = true;
             }
             if (duration < minDuration) {
+                minIsSlow = isSlow;
                 minDuration = duration;
                 minJobIt = it;
             }
@@ -226,9 +230,10 @@ public:
 
         // printf("ServeShortest(): shortest duration %.3f.\n", minDuration);
         if (minJobIt != job_queue.end()) {
-            if (minDuration > TIME_OUT && num_available < HALF_RESOURCE) return false;
-            /* find one, schedule the job */
             yarn_job_t * minJob = *minJobIt;
+            int durationOffset = (minIsSlow ? minJob -> slowDuration : minJob -> duration) * 0.1;
+            if (minDuration + durationOffset > TIME_OUT) return false;
+            /* find one, schedule the job */
             if(DispatchJob(minJob->jobId, minJob->jobType, minJob->k,
                            minJob->priority, minJob->duration, minJob->slowDuration)) {
                 printf("- Serve shortest job %d, duration: %.3f, %d machines left\n", (int) minJob->jobId, minDuration, num_available);
@@ -265,7 +270,6 @@ public:
         catch (TException& tx) {
             printf("ERROR calling YARN : %s\n", tx.what());
         }
-        ShowMachines(machines);
         return success;
     }
 
@@ -283,15 +287,13 @@ public:
             if (count >= k)
                 break;
         }
-        if (count < k) {
-            FreeMachines(machines);
-            return false;
-        }
         return true;
     }
 
     bool ScheduleSparseFCFS(std::set<int32_t> & machines, const int32_t k) {
         // FCFS + highest rank
+        printf("Sparse! ");
+        ShowFreeMachines();
         if (num_available < k)
             return false;
         int k_cp = k;
@@ -302,19 +304,14 @@ public:
                 int32_t machine = racks[i][j];
                 if (!machine_alloc[machine]) {
                     vm_cnt++;
+                    if (vm_cnt > REMAIN) {
+                        alloc_machine(machine);
+                        machines.insert(machine);
+                        k_cp--;
+                        if (k_cp <= 0) return true;
+                    }
                 }
             }
-            for (int w = REMAIN; w < vm_cnt; w++) {
-                if (k_cp <= 0) break;
-
-                int j = 0;
-                int32_t machine = racks[i][j];
-                while (machine_alloc[machine]) j++;
-                alloc_machine(machine);
-                machines.insert(machine);
-                k_cp--;
-            }
-            if (k_cp <= 0) return true;
         }
         return ScheduleStrictFCFS(machines, k_cp);
     }
@@ -459,14 +456,14 @@ public:
                 break;
         }
         if (success) {
-            printf("succeed in scheduling job %d\n", jobId);
+            printf("scheduling job %d in ", jobId);
+            ShowMachines(machines);
             success = AllocResources(jobId, machines);
             if (success)
                 num_available -= k;
             else {
                 printf("NOT VERY SUCCESS...: ");
                 num_available -= k;     // in case fail again
-                ShowMachines(machines);
             }
         }
         return success;
@@ -484,7 +481,7 @@ public:
         pthread_mutex_lock(&lock);
         printf("Comes Job %d: %f, %f; with %d racks demand.\n", jobId, duration, slowDuration, k);
         // Your implementation goes here
-        if(simType != simtype_t::NONE || job_queue.size() != 0 ||
+        if(job_queue.size() != 0 ||
                 !DispatchJob(jobId, jobType, k, priority, duration, slowDuration)) {
             /* no enough resources, add to queue */
             yarn_job_t* job = new yarn_job_t(jobId, jobType, k,
