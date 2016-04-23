@@ -565,9 +565,14 @@ public:
         /* keep serve until no enough resources */
         TetrischedServiceHandler * obj = (TetrischedServiceHandler *) args;
         while(1) {
-            while (milli_time() - obj -> last_free_time < 500 * 1000)
+            while (milli_time() - obj -> last_free_time < 800 * 1000)
                 sleep(1);
             pthread_mutex_lock(&(obj->lock));
+            while (milli_time() - obj -> last_free_time < 500 * 1000) {
+                pthread_mutex_unlock(&(obj->lock));
+                sleep(1);
+                pthread_mutex_lock(&(obj->lock));
+            }
             while (obj -> ServeQueue());
             pthread_mutex_unlock(&(obj->lock));
             obj -> cnt ++;
