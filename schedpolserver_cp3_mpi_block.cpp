@@ -113,7 +113,7 @@ private:
     }
 public:
 
-    TetrischedServiceHandler()
+    TetrischedServiceHandler(const char * configFile)
     {
         if (pthread_mutex_init(&lock, NULL) != 0)
         {
@@ -121,7 +121,8 @@ public:
             return;
         }
         printf("init\n");
-        ReadConfigFile();
+        const char * inFileName = configFile;
+        ReadConfigFile(configFile);
         machine_alloc = new bool[num_machines];
         memset(machine_alloc, 0, num_machines);
         srand((unsigned int) time(NULL));
@@ -133,8 +134,7 @@ public:
     }
 
     /* read rack_cap from config-mini file */
-    void ReadConfigFile() {
-        const char * inFileName = "/opt/projects/advcc/hadoop/hadoop-2.2.0/exp-advcc.phase3/config/config-timex1-c2x4-g4-h6-rho0.70";  // TODO: CHANGE HERE!
+    void ReadConfigFile(const char * inFileName) {
         ifstream inFile;
         inFile.open(inFileName);//open the input file
         stringstream strStream;
@@ -169,24 +169,29 @@ public:
         rack_machine_type[0] = machine_t::MACHINE_GPU;
         num_machines = startMahineId;
         num_available = num_machines;
-
-        string simstring = document["simtype"].GetString();
-        // assert(simstring.IsString());
-        if (simstring.compare("hard") == 0) {
-            simType = simtype_t::HARD;
-            printf("Scheduling policy is set to HARD.\n");
-        }
-        else if (simstring.compare("soft") == 0) {
-            simType = simtype_t::SOFT;
-            printf("Scheduling policy is set to SOFT.\n");
-        }
-        else if (simstring.compare("none") == 0) {
-            simType = simtype_t::NONE;
-            printf("Scheduling policy is set to NONE.\n");
+        if(document.HasMember("simtype")) {
+            string simstring = document["simtype"].GetString();
+            // assert(simstring.IsString());
+            if (simstring.compare("hard") == 0) {
+                simType = simtype_t::HARD;
+                printf("Scheduling policy is set to HARD.\n");
+            }
+            else if (simstring.compare("soft") == 0) {
+                simType = simtype_t::SOFT;
+                printf("Scheduling policy is set to SOFT.\n");
+            }
+            else if (simstring.compare("none") == 0) {
+                simType = simtype_t::NONE;
+                printf("Scheduling policy is set to NONE.\n");
+            }
+            else {
+                simType = simtype_t::SOFT;
+                printf("Cannot understand the file type: %d, set it to soft\n", simType);
+            }
         }
         else {
-            simType = simtype_t::NONE;
-            printf("Cannot understand the file type: %d, set it to none\n", simType);
+            simType = simtype_t::SOFT;
+            printf("Do not have simtype field, set it to soft\n");            
         }
     }
 
@@ -578,10 +583,18 @@ public:
 
 int main(int argc, char **argv)
 {
-
+    /* default config file name */
+    char * configFile = 
+        "/opt/projects/advcc/hadoop/hadoop-2.2.0/exp-advcc.phase3/config/config-timex1-c2x4-g4-h6-rho0.70";
+    /* for simplicity, we only support the server run by 
+     * ./schedpolserver or ./schedpolserver -c configFileName */
+    if (argc >= 3) {
+        /* if has command line argvs */
+        configFile = argv[2];
+    }
     //create a listening server socket
     int alschedport = 9091;
-    shared_ptr<TetrischedServiceHandler> handler(new TetrischedServiceHandler());
+    shared_ptr<TetrischedServiceHandler> handler(new TetrischedServiceHandler(configFile));
     shared_ptr<TProcessor> processor(new TetrischedServiceProcessor(handler));
     shared_ptr<TServerTransport> serverTransport(new TServerSocket(alschedport));
     shared_ptr<TTransportFactory> transportFactory(new TBufferedTransportFactory());
