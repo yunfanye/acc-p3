@@ -438,12 +438,7 @@ public:
             if (simType == simtype_t::HARD) 
                 return false;
             if (jobType == job_t::JOB_GPU) {
-                /* GPU jobs don't need to allocate on the same rack
-                 * try to make space for MPI jobs */
-                if (!ScheduleSparseFCFS(machines, k) ) {
-                    return ScheduleStrictFCFS(machines, k);
-                }
-                return true;
+                return ScheduleStrictFCFS(machines, k);
             }
             else {
                 return ScheduleStrictFCFS(machines, k);
