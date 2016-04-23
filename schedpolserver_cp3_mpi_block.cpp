@@ -227,6 +227,7 @@ public:
         }
 
 
+
         // printf("ServeShortest(): shortest duration %.3f.\n", minDuration);
         if (minJobIt != job_queue.end()) {
             yarn_job_t * minJob = *minJobIt;
@@ -277,16 +278,18 @@ public:
         if (num_available < k)
             return false;
         int count = 0;
-        for (int i = num_machines - 1; i >= 0; i--) {
+        for (int i = num_machines - 1; i >= 4; i--) {
             if (machine_alloc[i])
                 continue;
             alloc_machine(i);
             machines.insert(i);
             count++;
             if (count >= k)
-                break;
+                return true;
         }
-        return true;
+        FreeMachines(machines);
+        machines.clear();
+        return false;
     }
 
     bool ScheduleSparseFCFS(std::set<int32_t> & machines, const int32_t k) {
@@ -312,7 +315,9 @@ public:
                 }
             }
         }
-        return ScheduleStrictFCFS(machines, k_cp);
+        FreeMachines(machines);
+        machines.clear();
+        return ScheduleStrictFCFS(machines, k);
     }
 
     bool ScheduleRandomFCFS(std::set<int32_t> & machines, const int32_t k) {
@@ -425,10 +430,10 @@ public:
             return false;
         if (!TryAllocPreferredResources(machines, jobType, k)) {
             if (simType == simtype_t::HARD) return false;
-            if (jobType == job_t::JOB_GPU) ScheduleSparseFCFS(machines, k);
+            if (jobType == job_t::JOB_GPU) return ScheduleSparseFCFS(machines, k);
             /* fail to schedule on preferred resources
              * free to schedule anywhere, use strict FCFS here */
-            else ScheduleStrictFCFS(machines, k);
+            else return ScheduleStrictFCFS(machines, k);
             // return ScheduleStrictFCFS(machines, k);
         }
         return true;
@@ -548,17 +553,17 @@ public:
         /* keep serve until no enough resources */
         TetrischedServiceHandler * obj = (TetrischedServiceHandler *) args;
         while(1) {
-            sleep(2);
-            if(milli_time() - obj -> last_free_time < 100 * 1000)
+            while (milli_time() - obj -> last_free_time < 500 * 1000)
                 sleep(1);
             pthread_mutex_lock(&(obj->lock));
-            while(obj -> ServeQueue());
+            while (obj -> ServeQueue());
             pthread_mutex_unlock(&(obj->lock));
             obj -> cnt ++;
             if (obj -> cnt % 100 == 0) {
                 printf("[CheckServeQueue] %d jobs in the queue with %d num_available.\n", (int) obj -> job_queue.size(), obj->num_available);
                 obj -> ShowFreeMachines();
             }
+            sleep(2);
         }
         return NULL;
     }
