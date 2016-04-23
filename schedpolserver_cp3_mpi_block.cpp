@@ -23,12 +23,15 @@
 
 #include <cstdlib>
 
-// rack reservation for MPI jobs
+/* rack reservation for MPI jobs */
 #define REMAIN 4
-// maximum waiting time
+/* maximum waiting time */
 #define TIME_OUT 1190
-// estimate adjustment
+/* duration adjustment */
 #define DURATION_OFFSET 1.15
+/* slow duration adjustment, when get unpreferred resources
+ * the job generally execute much slower than expected */
+#define SLOW_DURATION_OFFSET 1.25
 
 using namespace rapidjson;
 
@@ -221,7 +224,7 @@ public:
                     (current_time - job -> come_time);
             }
             else if (simType == simtype_t::SOFT) {
-                duration = job -> slowDuration * DURATION_OFFSET + 
+                duration = job -> slowDuration * SLOW_DURATION_OFFSET + 
                     (current_time - job -> come_time);
             }
             if (duration < minDuration) {
@@ -318,7 +321,7 @@ public:
         }
         FreeMachines(machines);
         machines.clear();
-        return ScheduleStrictFCFS(machines, k);
+        return false;
     }
 
     bool ScheduleRandomFCFS(std::set<int32_t> & machines, const int32_t k) {
@@ -430,14 +433,22 @@ public:
         if (num_available < k)
             return false;
         if (!TryAllocPreferredResources(machines, jobType, k)) {
-            if (simType == simtype_t::HARD) return false;
-            if (jobType == job_t::JOB_GPU) return ScheduleSparseFCFS(machines, k);
             /* fail to schedule on preferred resources
              * free to schedule anywhere, use strict FCFS here */
-            else return ScheduleStrictFCFS(machines, k);
-            // return ScheduleStrictFCFS(machines, k);
+            if (simType == simtype_t::HARD) 
+                return false;
+            if (jobType == job_t::JOB_GPU) {
+                /* GPU jobs don't need to allocate on the same rack
+                 * try to make space for MPI jobs */
+                if (!ScheduleSparseFCFS(machines, k) ) {
+                    return ScheduleStrictFCFS(machines, k);
+                }
+                return true;
+            }
+            else {
+                return ScheduleStrictFCFS(machines, k);
+            }
         }
-        return true;
     }
 
     bool DispatchJob(const JobID jobId, const job_t::type jobType, const int32_t k,
