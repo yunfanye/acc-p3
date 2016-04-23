@@ -23,8 +23,12 @@
 
 #include <cstdlib>
 
+// rack reservation for MPI jobs
 #define REMAIN 4
-#define TIME_OUT 1180
+// maximum waiting time
+#define TIME_OUT 1190
+// estimate adjustment
+#define DURATION_OFFSET 1.15
 
 using namespace rapidjson;
 
@@ -203,36 +207,33 @@ public:
         /* loop queue to find shortest */
         std::deque<yarn_job_t*>::iterator it;
         double current_time = (double)milli_time() / 1000000.0;
-        bool minIsSlow = false;
         for (it = job_queue.begin(); it != job_queue.end(); ++it) {
             yarn_job_t* job = *it;
             double duration = (double) INT_MAX;
-            // TODO: whether need to wait no enough resource job
             if (num_available < job -> k)
                 continue;
-            bool isSlow;
             if (CanAllocPreferredResources(job -> jobType, job -> k)) {
-                duration = job -> duration + current_time - job -> come_time;
-                isSlow = false;
+                /* duration estimate is not accurate, and usually it is slower
+                 * than estimate. What's worse, it is sometimes much slower than
+                 * the time given. For simplicity, we use DURATION_OFFSET
+                 * to make up for this */
+                duration = job -> duration * DURATION_OFFSET +
+                    (current_time - job -> come_time);
             }
             else if (simType == simtype_t::SOFT) {
-                duration = job -> slowDuration + current_time - job -> come_time;
-                isSlow = true;
+                duration = job -> slowDuration * DURATION_OFFSET + 
+                    (current_time - job -> come_time);
             }
             if (duration < minDuration) {
-                minIsSlow = isSlow;
                 minDuration = duration;
                 minJobIt = it;
             }
         }
 
-
-
         // printf("ServeShortest(): shortest duration %.3f.\n", minDuration);
         if (minJobIt != job_queue.end()) {
             yarn_job_t * minJob = *minJobIt;
-            int durationOffset = (minIsSlow ? minJob -> slowDuration : minJob -> duration) * 0.1;
-            if (minDuration + durationOffset > TIME_OUT) return false;
+            if (minDuration > TIME_OUT) return false;
             /* find one, schedule the job */
             if(DispatchJob(minJob->jobId, minJob->jobType, minJob->k,
                            minJob->priority, minJob->duration, minJob->slowDuration)) {
