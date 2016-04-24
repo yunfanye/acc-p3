@@ -121,7 +121,6 @@ public:
             return;
         }
         printf("init\n");
-        const char * inFileName = configFile;
         ReadConfigFile(configFile);
         machine_alloc = new bool[num_machines];
         memset(machine_alloc, 0, num_machines);
@@ -449,6 +448,7 @@ public:
                 return ScheduleStrictFCFS(machines, k);
             }
         }
+        return true;
     }
 
     bool DispatchJob(const JobID jobId, const job_t::type jobType, const int32_t k,
@@ -590,7 +590,7 @@ int main(int argc, char **argv)
 {
     /* default config file name */
     char * configFile = 
-        "/opt/projects/advcc/hadoop/hadoop-2.2.0/exp-advcc.phase3/config/config-timex1-c2x4-g4-h6-rho0.70";
+        const_cast<char*>("/opt/projects/advcc/hadoop/hadoop-2.2.0/exp-advcc.phase3/config/config-timex1-c2x4-g4-h6-rho0.70");
     /* for simplicity, we only support the server run by 
      * ./schedpolserver or ./schedpolserver -c configFileName */
     if (argc >= 3) {
