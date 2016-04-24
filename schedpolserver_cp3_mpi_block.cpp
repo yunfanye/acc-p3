@@ -32,6 +32,8 @@
 /* slow duration adjustment, when get unpreferred resources
  * the job generally execute much slower than expected */
 #define SLOW_DURATION_OFFSET 1.25
+/* maximum job id */
+#define MAX_JOB_ID 8196
 
 using namespace rapidjson;
 
@@ -103,6 +105,8 @@ private:
     simtype_t::type simType;
     /* DEBUG */
     int cnt;
+    /* prevent job with same id */
+    int id_map[MAX_JOB_ID];
 
     void alloc_machine(int32_t machine) {
         machine_alloc[machine] = true;
@@ -124,6 +128,7 @@ public:
         ReadConfigFile(configFile);
         machine_alloc = new bool[num_machines];
         memset(machine_alloc, 0, num_machines);
+        memset(id_map, 0, sizeof(int) * MAX_JOB_ID);
         srand((unsigned int) time(NULL));
 
         created = false;
@@ -498,6 +503,10 @@ public:
         
         pthread_mutex_lock(&lock);
         printf("Comes Job %d: %f, %f; with %d racks demand.\n", jobId, duration, slowDuration, k);
+        
+        if (jobId < MAX_JOB_ID && id_map[jobId]) return;
+        id_map[jobId] = 1;
+
         // Your implementation goes here
         if(job_queue.size() != 0 ||
                 !DispatchJob(jobId, jobType, k, priority, duration, slowDuration)) {
